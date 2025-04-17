@@ -154,7 +154,7 @@ async def submit(
     with console.status("[bold blue]Processing...[/bold blue]"):
         result = await agent.run(prompt, message_history=message_history, usage=usage)
 
-    console.print(Markdown(result.data))
+    console.print(Markdown(result.output))
 
     with all_messages_json.open("wb") as f:
         f.write(result.all_messages_json())

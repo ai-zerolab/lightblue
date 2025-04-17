@@ -13,7 +13,7 @@ async def main():
     prompt = template.render(objective=objective)
 
     result = await agent.run(prompt)
-    print(result.data)
+    print(result.output)
 
 
 if __name__ == "__main__":

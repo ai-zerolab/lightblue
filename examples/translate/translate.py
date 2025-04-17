@@ -48,7 +48,7 @@ async def main():
 
     user_prompt = user_prompt_template.format(user_input=user_input)
     result = await agent.run(user_prompt)
-    print(result.data.translated_text)
+    print(result.output.translated_text)
 
 
 if __name__ == "__main__":

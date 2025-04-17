@@ -33,6 +33,7 @@ from pydantic_ai.models import (
     StreamedResponse,
     cached_async_http_client,
     check_allow_model_requests,
+    get_user_agent,
 )
 from pydantic_ai.providers import Provider, infer_provider
 from pydantic_ai.settings import ModelSettings
@@ -153,10 +154,7 @@ class AnthropicModel(Model):
     ) -> tuple[ModelResponse, usage.Usage]:
         check_allow_model_requests()
         response = await self._messages_create(
-            messages,
-            False,
-            cast(AnthropicModelSettings, model_settings or {}),
-            model_request_parameters,
+            messages, False, cast(AnthropicModelSettings, model_settings or {}), model_request_parameters
         )
         return self._process_response(response), _map_usage(response)
 
@@ -169,10 +167,7 @@ class AnthropicModel(Model):
     ) -> AsyncIterator[StreamedResponse]:
         check_allow_model_requests()
         response = await self._messages_create(
-            messages,
-            True,
-            cast(AnthropicModelSettings, model_settings or {}),
-            model_request_parameters,
+            messages, True, cast(AnthropicModelSettings, model_settings or {}), model_request_parameters
         )
         async with response:
             yield await self._process_streamed_response(response)
@@ -221,7 +216,7 @@ class AnthropicModel(Model):
         if not tools:
             tool_choice = None
         else:
-            if not model_request_parameters.allow_text_result:
+            if not model_request_parameters.allow_text_output:
                 tool_choice = {"type": "any"}
             else:
                 tool_choice = {"type": "auto"}
@@ -240,10 +235,12 @@ class AnthropicModel(Model):
                 tools=tools or NOT_GIVEN,
                 tool_choice=tool_choice or NOT_GIVEN,
                 stream=stream,
+                stop_sequences=model_settings.get("stop_sequences", NOT_GIVEN),
                 temperature=model_settings.get("temperature", NOT_GIVEN),
                 top_p=model_settings.get("top_p", NOT_GIVEN),
                 timeout=model_settings.get("timeout", NOT_GIVEN),
                 metadata=model_settings.get("anthropic_metadata", NOT_GIVEN),
+                extra_headers={"User-Agent": get_user_agent()},
             )
         except APIStatusError as e:
             if (status_code := e.status_code) >= 400:
@@ -277,15 +274,13 @@ class AnthropicModel(Model):
         # Since Anthropic doesn't provide a timestamp in the message, we'll use the current time
         timestamp = datetime.now(tz=timezone.utc)
         return AnthropicStreamedResponse(
-            _model_name=self._model_name,
-            _response=peekable_response,
-            _timestamp=timestamp,
+            _model_name=self._model_name, _response=peekable_response, _timestamp=timestamp
         )
 
     def _get_tools(self, model_request_parameters: ModelRequestParameters) -> list[ToolParam]:
         tools = [self._map_tool_definition(r) for r in model_request_parameters.function_tools]
-        if model_request_parameters.result_tools:
-            tools += [self._map_tool_definition(r) for r in model_request_parameters.result_tools]
+        if model_request_parameters.output_tools:
+            tools += [self._map_tool_definition(r) for r in model_request_parameters.output_tools]
         return tools
 
     async def _map_message(self, messages: list[ModelMessage]) -> tuple[str, list[MessageParam]]:
@@ -306,31 +301,20 @@ class AnthropicModel(Model):
                     elif isinstance(request_part, ToolReturnPart):
                         if isinstance(request_part.content, BinaryContent):
                             if request_part.content.is_image:
-                                content = ImageBlockParam(
-                                    source={
-                                        "data": io.BytesIO(request_part.content.data),
-                                        "media_type": request_part.content.media_type,
-                                        "type": "base64",
-                                    },  # type: ignore
-                                    type="image",
-                                )
-                            elif request_part.content.media_type == "application/pdf":
-                                content = DocumentBlockParam(
-                                    source=Base64PDFSourceParam(
-                                        data=io.BytesIO(request_part.content.data),
-                                        media_type="application/pdf",
-                                        type="base64",
-                                    ),
-                                    type="document",
-                                )
-
+                                content = [
+                                    ImageBlockParam(
+                                        source={
+                                            "data": io.BytesIO(request_part.content.data),
+                                            "media_type": request_part.content.media_type,
+                                            "type": "base64",
+                                        },  # type: ignore
+                                        type="image",
+                                    )
+                                ]
                             else:
-                                raise NotImplementedError(
-                                    f"BinaryContent{request_part.content.media_type} is not supported yet."
-                                )
+                                content = f"{request_part.content.format} is not supported yet."
                         else:
                             content = request_part.model_response_str()
-
                         tool_result_block_param = ToolResultBlockParam(
                             tool_use_id=_guard_tool_call_id(t=request_part),
                             type="tool_result",
@@ -366,6 +350,8 @@ class AnthropicModel(Model):
                 anthropic_messages.append(MessageParam(role="assistant", content=assistant_content_params))
             else:
                 assert_never(m)
+        if instructions := self._get_instructions(messages):
+            system_prompt = f"{instructions}\n\n{system_prompt}"
         return system_prompt, anthropic_messages
 
     @staticmethod
@@ -404,11 +390,7 @@ class AnthropicModel(Model):
                         response = await cached_async_http_client().get(item.url)
                         response.raise_for_status()
                         yield DocumentBlockParam(
-                            source=PlainTextSourceParam(
-                                data=response.text,
-                                media_type=item.media_type,
-                                type="text",
-                            ),
+                            source=PlainTextSourceParam(data=response.text, media_type=item.media_type, type="text"),
                             type="document",
                         )
                     else:  # pragma: no cover

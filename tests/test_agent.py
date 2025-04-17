@@ -22,7 +22,7 @@ async def stream_function(messages: list[ModelMessage], info: AgentInfo) -> Asyn
 async def test_agent():
     agent = LightBlueAgent(model=FunctionModel(function=return_tools, stream_function=stream_function))
 
-    (await agent.run("Hello, world!")).data == snapshot(
+    (await agent.run("Hello, world!")).output == snapshot(
         """\
 thinking, Use the tool to think about something. It will not obtain new information or change the database, but just append the thought to the log. Use it when complex reasoning or some cache memory is needed., {'additionalProperties': False, 'properties': {'thought': {'description': 'A thought to think about.', 'type': 'string'}}, 'required': ['thought'], 'type': 'object'}
 

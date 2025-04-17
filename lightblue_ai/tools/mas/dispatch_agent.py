@@ -75,7 +75,7 @@ Usage notes:
                 data = BinaryContent(data=content, media_type=self._get_mime_type(path))
                 attatchment_data.append(data)
                 logger.info(f"{path} attatchment added")
-        return (await self.agent.run([*attatchment_data, objective])).data
+        return (await self.agent.run([*attatchment_data, objective])).output
 
 
 class ReflactionAgentTool(DispatchAgentTool):

@@ -13,6 +13,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models import Model
 from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.result import ToolOutput
 from pydantic_ai.tools import Tool
 from pydantic_ai.usage import Usage
 
@@ -24,15 +25,15 @@ from lightblue_ai.settings import Settings
 from lightblue_ai.tools.manager import LightBlueToolManager
 from lightblue_ai.utils import PendingMessage
 
-T = TypeVar("T")
+OutputDataT = TypeVar("T")
 
 
-class LightBlueAgent[T]:
+class LightBlueAgent[OutputDataT]:
     def __init__(
         self,
         model: str | Model | None = None,
         system_prompt: str | None = None,
-        result_type: T = str,
+        result_type: type[OutputDataT] = str,
         result_tool_name: str = "final_result",
         result_tool_description: str | None = None,
         tools: list[Tool] | None = None,
@@ -66,11 +67,18 @@ class LightBlueAgent[T]:
         )
 
         self.tool_manager = LightBlueToolManager(max_description_length=max_description_length, strict=strict)
-        self.agent = Agent(
+        self.agent = Agent[result_type](
             infer_model(model),
-            result_type=result_type,
-            result_tool_name=result_tool_name,
-            result_tool_description=result_tool_description,
+            output_type=(
+                ToolOutput(
+                    type_=result_type,
+                    name=result_tool_name,
+                    description=result_tool_description,
+                    strict=strict,
+                )
+                if result_type is not str
+                else str
+            ),
             system_prompt=system_prompt or get_system_prompt(),
             tools=[*tools, *self.tool_manager.get_all_tools()],
             mcp_servers=[*mcp_servers, *get_mcp_servers()],
@@ -84,7 +92,7 @@ class LightBlueAgent[T]:
         *,
         message_history: None | list[ModelMessage] = None,
         usage: None | Usage = None,
-    ) -> AgentRunResult[T]:
+    ) -> AgentRunResult[OutputDataT]:
         messages = PendingMessage(multi_turn=self.enable_multi_turn, tool_return_data=self.tool_return_data)
         async with self.agent.run_mcp_servers():
             result = await self.agent.run(user_prompt, message_history=message_history, deps=messages)
